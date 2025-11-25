@@ -113,6 +113,69 @@ namespace ManteHos.Services
             else throw new ServiceException("Part with Description " + part.Description + " already exists.");
         }
 
+        public IEnumerable<WorkOrder> GetOpenWorkOrdersForOperator(string operatorId)
+        {
+            if (string.IsNullOrWhiteSpace(operatorId))
+            {
+                throw new ServiceException("Operator Id is required.");
+            }
+
+            if (dal.GetById<Operator>(operatorId) == null)
+            {
+                throw new ServiceException("Operator with Id " + operatorId + " does not exist.");
+            }
+
+            return dal.GetWhere<WorkOrder>(wo => wo.EndDate == null && wo.Operators.Any(op => op.Id == operatorId));
+        }
+
+        public void CloseWorkOrder(string operatorId, int workOrderId, string repairReport, DateTime? endDate = null)
+        {
+            if (string.IsNullOrWhiteSpace(operatorId))
+            {
+                throw new ServiceException("Operator Id is required.");
+            }
+
+            Operator closingOperator = dal.GetById<Operator>(operatorId);
+            if (closingOperator == null)
+            {
+                throw new ServiceException("Operator with Id " + operatorId + " does not exist.");
+            }
+
+            WorkOrder workOrder = dal.GetById<WorkOrder>(workOrderId);
+            if (workOrder == null)
+            {
+                throw new ServiceException("Work order with Id " + workOrderId + " does not exist.");
+            }
+
+            if (workOrder.EndDate != null)
+            {
+                throw new ServiceException("Work order with Id " + workOrderId + " is already closed.");
+            }
+
+            if (!workOrder.Operators.Any(op => op.Id == operatorId))
+            {
+                throw new ServiceException("Operator with Id " + operatorId + " is not assigned to work order " + workOrderId + ".");
+            }
+
+            if (workOrder.UsedParts.Any(p => p.Needed))
+            {
+                throw new ServiceException("Work order with Id " + workOrderId + " cannot be closed because there are pending parts.");
+            }
+
+            workOrder.RepairReport = repairReport;
+            workOrder.EndDate = endDate ?? DateTime.Now;
+
+            if (workOrder.Incident != null)
+            {
+                workOrder.Incident.Status = Status.Completed;
+                workOrder.Incident.CostOfUsedParts = workOrder.UsedParts
+                    .Where(p => !p.Needed)
+                    .Sum(p => p.Quantity * p.Part.UnitPrice);
+            }
+
+            dal.Commit();
+        }
+
         //
         // Resto de metodos necesarios para el servicio
         //
